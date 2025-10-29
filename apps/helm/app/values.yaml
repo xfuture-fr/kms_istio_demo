@@ -1,0 +1,59 @@
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: europe-docker.pkg.dev/PROJECT_ID/docker/APP_PLACEHOLDER
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+serviceAccount:
+  create: true
+  name: ""     # si vide: app.fullname
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+
+ports:
+  app:
+    name: http
+    containerPort: 8080
+    servicePort: 8080
+
+env: []        # ex: [{name: B_HOST, value: "svc-b.mesh-demo.svc.cluster.local"}]
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 300m
+    memory: 256Mi
+
+livenessProbe:
+  enabled: true
+  path: /hello
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+readinessProbe:
+  enabled: true
+  path: /hello
+  initialDelaySeconds: 3
+  periodSeconds: 5
+
+service:
+  type: ClusterIP
+
+hpa:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+
+# Namespace cible (tu peux l’ignorer si tu passes --namespace à helm)
+namespace: ""
+
+# Istio: pense à labeller le namespace mesh-demo -> istio-injection=enabled

@@ -1,0 +1,11 @@
+fullnameOverride: svc-a
+image:
+  repository: europe-docker.pkg.dev/PROJECT_ID/docker/svc-a
+  tag: "GIT_SHA"
+env:
+  - name: B_HOST
+    value: "svc-b.mesh-demo.svc.cluster.local"
+livenessProbe:
+  path: /hello
+readinessProbe:
+  path: /hello

@@ -1,0 +1,8 @@
+fullnameOverride: svc-c
+image:
+  repository: europe-docker.pkg.dev/PROJECT_ID/docker/svc-c
+  tag: "GIT_SHA"
+livenessProbe:
+  path: /hello
+readinessProbe:
+  path: /hello

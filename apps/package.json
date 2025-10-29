@@ -1,0 +1,12 @@
+{
+  "name": "mesh-demo",
+  "private": true,
+  "workspaces": ["apps/*"],
+  "overrides": {
+    "express": "^4.19.2",
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "eslint": "^9.0.0"
+  }
+}

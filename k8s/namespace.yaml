@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mesh-demo
+  labels:
+    istio-injection: enabled   # <--- Active l’injection automatique du sidecar Envoy (Istio)
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: legacy
+  labels: {}                   # <--- Pas d’injection Istio ici (trafic non chiffré)

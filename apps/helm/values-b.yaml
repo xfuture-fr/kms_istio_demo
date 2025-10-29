@@ -1,0 +1,8 @@
+fullnameOverride: svc-b
+image:
+  repository: europe-docker.pkg.dev/PROJECT_ID/docker/svc-b
+  tag: "GIT_SHA"
+livenessProbe:
+  path: /name
+readinessProbe:
+  path: /name
