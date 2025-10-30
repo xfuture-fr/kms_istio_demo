@@ -13,11 +13,12 @@ env:
   REGION:     ${{ vars.GKE_REGION }}          # ex: europe-west9
   CLUSTER:    ${{ vars.GKE_CLUSTER }}         # ex: mesh-demo-autopilot
   AR_LOC:     ${{ vars.ART_REG_LOCATION }}    # ex: europe
-  REPO_ID:    docker                             # repository_id Artifact Registry (Terraform)
+  REPO_ID:    docker
 
-  # chemins adaptés à TON repo
-  SERVICES_ROOT: apps/apps        # <-- code a,b,c ici
-  HELM_ROOT:     apps/helm        # <-- chart + values ici
+  # repo layout
+  DOCKERFILE_ROOT: apps         # <-- Dockerfile sous apps/Dockerfile
+  SERVICES_ROOT:   apps/apps    # <-- code source des services
+  HELM_ROOT:       apps/helm    # <-- chart Helm
 
 jobs:
   build-push:
@@ -42,25 +43,28 @@ jobs:
           echo "SHA=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
           echo "REG=${{ env.AR_LOC }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_ID }}" >> $GITHUB_OUTPUT
 
-      # Build & Push : on supporte 2 cas
-      #  - Dockerfile racine (monorepo, --build-arg SERVICE)
-      #  - Dockerfile par service: apps/apps/<svc>/Dockerfile
       - name: Build & Push svc-${{ matrix.service }}
         run: |
           set -euo pipefail
           REG="${{ steps.vars.outputs.REG }}"
           SHA="${{ steps.vars.outputs.SHA }}"
           SVC="${{ matrix.service }}"
-          if [ -f "./Dockerfile" ]; then
-            echo "→ Build via Dockerfile RACINE (monorepo) --build-arg SERVICE=$SVC"
-            docker build --build-arg SERVICE="$SVC" -t "$REG/svc-$SVC:$SHA" .
+
+          # Cas 1 : Dockerfile sous apps/
+          if [ -f "${DOCKERFILE_ROOT}/Dockerfile" ]; then
+            echo "→ Build via ${DOCKERFILE_ROOT}/Dockerfile (context=repo root)"
+            docker build -f "${DOCKERFILE_ROOT}/Dockerfile" \
+              --build-arg SERVICE="$SVC" \
+              -t "$REG/svc-$SVC:$SHA" .
+          # Cas 2 : Dockerfile spécifique au service
           elif [ -f "${SERVICES_ROOT}/$SVC/Dockerfile" ]; then
             echo "→ Build via ${SERVICES_ROOT}/$SVC/Dockerfile"
             docker build -t "$REG/svc-$SVC:$SHA" "${SERVICES_ROOT}/$SVC"
           else
-            echo "::error::Aucun Dockerfile trouvé (racine ni ${SERVICES_ROOT}/$SVC)"
+            echo "::error::Aucun Dockerfile trouvé (apps/Dockerfile ni ${SERVICES_ROOT}/$SVC/Dockerfile)"
             exit 1
           fi
+
           docker push "$REG/svc-$SVC:$SHA"
 
   deploy:
@@ -72,8 +76,8 @@ jobs:
 
       - uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
-          service_account:           ${{ secrets.GCP_SA_EMAIL }}
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account:           ${{ vars.GCP_SA_EMAIL }}
 
       - uses: google-github-actions/get-gke-credentials@v2
         with:
@@ -92,17 +96,17 @@ jobs:
           set -euo pipefail
           SHA=$(git rev-parse --short HEAD)
           REG="${{ env.AR_LOC }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_ID }}"
+
           if [ ! -f "${HELM_ROOT}/app/Chart.yaml" ]; then
             echo "::error::Chart introuvable sous ${HELM_ROOT}/app"
             exit 1
           fi
 
-          # Génère des values temporaires avec repo + tag corrects
+          # Génère des fichiers values dynamiques avec image/tag corrects
           sed "s/GIT_SHA/$SHA/g; s|europe-docker.pkg.dev/PROJECT_ID/docker/svc-a|$REG/svc-a|g" ${HELM_ROOT}/values-a.yaml > /tmp/values-a.yaml
           sed "s/GIT_SHA/$SHA/g; s|europe-docker.pkg.dev/PROJECT_ID/docker/svc-b|$REG/svc-b|g" ${HELM_ROOT}/values-b.yaml > /tmp/values-b.yaml
           sed "s/GIT_SHA/$SHA/g; s|europe-docker.pkg.dev/PROJECT_ID/docker/svc-c|$REG/svc-c|g" ${HELM_ROOT}/values-c.yaml > /tmp/values-c.yaml
 
-          # A & B dans mesh-demo (sidecar Istio), C dans legacy (pas de sidecar)
           helm upgrade --install a ${HELM_ROOT}/app -n mesh-demo -f /tmp/values-a.yaml --create-namespace=false
           helm upgrade --install b ${HELM_ROOT}/app -n mesh-demo -f /tmp/values-b.yaml --create-namespace=false
           helm upgrade --install c ${HELM_ROOT}/app -n legacy     -f /tmp/values-c.yaml --create-namespace=false
