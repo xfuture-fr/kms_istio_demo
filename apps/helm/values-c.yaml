@@ -3,6 +3,6 @@ image:
   repository: europe-docker.pkg.dev/PROJECT_ID/docker/svc-c
   tag: "GIT_SHA"
 livenessProbe:
-  path: /hello
+  path: /health
 readinessProbe:
-  path: /hello
+  path: /health

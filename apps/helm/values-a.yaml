@@ -6,6 +6,6 @@ env:
   - name: B_HOST
     value: "svc-b.mesh-demo.svc.cluster.local"
 livenessProbe:
-  path: /hello
+  path: /health
 readinessProbe:
-  path: /hello
+  path: /health

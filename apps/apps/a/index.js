@@ -15,4 +15,7 @@ app.get('/hello', async (_req, res) => {
   }
 });
 
+// ---- health endpoint that never calls another service ----
+app.get('/health', (_req, res) => res.status(200).send('ok'));
+
 app.listen(8080, () => console.log('A listening on 8080'));
