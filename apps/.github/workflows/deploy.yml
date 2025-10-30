@@ -1,0 +1,114 @@
+name: build-and-deploy
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: {}
+
+concurrency:
+  group: build-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  REGION:     ${{ vars.GKE_REGION }}          # ex: europe-west9
+  CLUSTER:    ${{ vars.GKE_CLUSTER }}         # ex: mesh-demo-autopilot
+  AR_LOC:     ${{ vars.ART_REG_LOCATION }}    # ex: europe
+  REPO_ID:    docker                             # repository_id Artifact Registry (Terraform)
+
+  # chemins adaptés à TON repo
+  SERVICES_ROOT: apps/apps        # <-- code a,b,c ici
+  HELM_ROOT:     apps/helm        # <-- chart + values ici
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    permissions: { id-token: write, contents: read }
+    strategy:
+      matrix: { service: [a, b, c] }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account:           ${{ vars.GCP_SA_EMAIL }}
+
+      - name: Docker login to Artifact Registry
+        run: gcloud auth configure-docker ${{ env.AR_LOC }}-docker.pkg.dev --quiet
+
+      - name: Compute tags/registry
+        id: vars
+        run: |
+          echo "SHA=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "REG=${{ env.AR_LOC }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_ID }}" >> $GITHUB_OUTPUT
+
+      # Build & Push : on supporte 2 cas
+      #  - Dockerfile racine (monorepo, --build-arg SERVICE)
+      #  - Dockerfile par service: apps/apps/<svc>/Dockerfile
+      - name: Build & Push svc-${{ matrix.service }}
+        run: |
+          set -euo pipefail
+          REG="${{ steps.vars.outputs.REG }}"
+          SHA="${{ steps.vars.outputs.SHA }}"
+          SVC="${{ matrix.service }}"
+          if [ -f "./Dockerfile" ]; then
+            echo "→ Build via Dockerfile RACINE (monorepo) --build-arg SERVICE=$SVC"
+            docker build --build-arg SERVICE="$SVC" -t "$REG/svc-$SVC:$SHA" .
+          elif [ -f "${SERVICES_ROOT}/$SVC/Dockerfile" ]; then
+            echo "→ Build via ${SERVICES_ROOT}/$SVC/Dockerfile"
+            docker build -t "$REG/svc-$SVC:$SHA" "${SERVICES_ROOT}/$SVC"
+          else
+            echo "::error::Aucun Dockerfile trouvé (racine ni ${SERVICES_ROOT}/$SVC)"
+            exit 1
+          fi
+          docker push "$REG/svc-$SVC:$SHA"
+
+  deploy:
+    needs: build-push
+    runs-on: ubuntu-latest
+    permissions: { id-token: write, contents: read }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account:           ${{ secrets.GCP_SA_EMAIL }}
+
+      - uses: google-github-actions/get-gke-credentials@v2
+        with:
+          project_id:   ${{ env.PROJECT_ID }}
+          cluster_name: ${{ env.CLUSTER }}
+          location:     ${{ env.REGION }}
+
+      - name: Apply namespaces
+        run: |
+          if [ -f "k8s/namespaces.yaml" ]; then
+            kubectl apply -f k8s/namespaces.yaml
+          fi
+
+      - name: Deploy with Helm (apps/helm)
+        run: |
+          set -euo pipefail
+          SHA=$(git rev-parse --short HEAD)
+          REG="${{ env.AR_LOC }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_ID }}"
+          if [ ! -f "${HELM_ROOT}/app/Chart.yaml" ]; then
+            echo "::error::Chart introuvable sous ${HELM_ROOT}/app"
+            exit 1
+          fi
+
+          # Génère des values temporaires avec repo + tag corrects
+          sed "s/GIT_SHA/$SHA/g; s|europe-docker.pkg.dev/PROJECT_ID/docker/svc-a|$REG/svc-a|g" ${HELM_ROOT}/values-a.yaml > /tmp/values-a.yaml
+          sed "s/GIT_SHA/$SHA/g; s|europe-docker.pkg.dev/PROJECT_ID/docker/svc-b|$REG/svc-b|g" ${HELM_ROOT}/values-b.yaml > /tmp/values-b.yaml
+          sed "s/GIT_SHA/$SHA/g; s|europe-docker.pkg.dev/PROJECT_ID/docker/svc-c|$REG/svc-c|g" ${HELM_ROOT}/values-c.yaml > /tmp/values-c.yaml
+
+          # A & B dans mesh-demo (sidecar Istio), C dans legacy (pas de sidecar)
+          helm upgrade --install a ${HELM_ROOT}/app -n mesh-demo -f /tmp/values-a.yaml --create-namespace=false
+          helm upgrade --install b ${HELM_ROOT}/app -n mesh-demo -f /tmp/values-b.yaml --create-namespace=false
+          helm upgrade --install c ${HELM_ROOT}/app -n legacy     -f /tmp/values-c.yaml --create-namespace=false
+
+      - name: Wait for rollouts
+        run: |
+          kubectl -n mesh-demo rollout status deploy/svc-b --timeout=180s
+          kubectl -n mesh-demo rollout status deploy/svc-a --timeout=180s
+          kubectl -n legacy    rollout status deploy/svc-c --timeout=180s
