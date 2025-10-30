@@ -11,7 +11,7 @@ app.get('/hello', async (_req, res) => {
     const txt = await r.text();
     res.send(`hello ${txt}`);
   } catch (e) {
-    res.status(502).send('failed to reach B');
+    res.status(502).send('Oh, failed to reach B ' + B_URL);
   }
 });
 
