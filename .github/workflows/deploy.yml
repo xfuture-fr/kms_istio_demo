@@ -34,8 +34,13 @@ jobs:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account:           ${{ vars.GCP_SA_EMAIL }}
 
-      - name: Docker login to Artifact Registry
-        run: gcloud auth configure-docker ${{ env.AR_LOC }}-docker.pkg.dev --quiet
+      - name: Docker login (Artifact Registry)
+        shell: bash
+        run: |
+          set +x  # évite tout echo involontaire
+          gcloud auth print-access-token \
+            | docker login -u oauth2accesstoken --password-stdin https://${{ env.AR_LOC }}-docker.pkg.dev
+
 
       - name: Compute tags/registry
         id: vars
