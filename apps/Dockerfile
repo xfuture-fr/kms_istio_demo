@@ -1,18 +1,22 @@
-# syntax=docker/dockerfile:1.7
-FROM node:20-alpine AS base
+# apps/Dockerfile
+FROM node:20-alpine
+
+# Service ciblé: a, b, ou c
+ARG SERVICE
+ENV SERVICE=${SERVICE}
+
 WORKDIR /app
 
-# On copie seulement les manifests nécessaires d'abord (pour le cache)
-ARG SERVICE
-COPY package.json package-lock.json ./
-COPY apps/${SERVICE}/package.json ./apps/${SERVICE}/package.json
+# 1) Copier uniquement les manifests du service pour profiter du cache
+#    (ton code est sous apps/apps/<service>/)
+COPY apps/apps/${SERVICE}/package*.json ./
 
-RUN npm ci --omit=dev --workspaces
+# 2) Installer les deps du service
+RUN npm ci --omit=dev || npm install --omit=dev
 
-# Puis on copie le code du service
-COPY apps/${SERVICE}/ ./apps/${SERVICE}/
+# 3) Copier le code du service
+COPY apps/apps/${SERVICE}/ ./
 
-# Expose & start
-WORKDIR /app/apps/${SERVICE}
 EXPOSE 8080
 CMD ["node", "index.js"]
+
